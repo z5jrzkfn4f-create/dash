@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin · TikTok Link Hub</title>
+<style>
+body{margin:0;padding:24px;background:#0b0d16;color:#f8fafc;font:15px/1.5 system-ui,sans-serif}
+main{max-width:1000px;margin:auto}
+.panel,.stat{padding:18px;margin:16px 0;background:#171b2a;border:1px solid #30364b;border-radius:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.num{font-size:28px;font-weight:bold}
+input,textarea,button{padding:10px;border-radius:8px;border:1px solid #30364b;font:inherit}
+input,textarea{background:#0b0d16;color:white;box-sizing:border-box;width:100%}
+textarea{min-height:170px;resize:vertical;line-height:1.6}
+button{cursor:pointer;background:#ff4d78;color:#210b13;font-weight:bold}
+button:disabled{opacity:.6;cursor:wait}
+.secondary{background:#343b50;color:white}.danger{background:#8a2941;color:white}
+.row{display:grid;grid-template-columns:minmax(0,2fr) auto auto;gap:8px;padding:12px 0;border-bottom:1px solid #30364b;align-items:center}
+.actions{display:flex;gap:6px;flex-wrap:wrap}.hidden{display:none}.muted{color:#bac3d5}.msg{color:#ff9ab2;min-height:22px}a{color:#ff9ab2}
+@media(max-width:700px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body><main>
+<p><a href="/">← Public site</a></p>
+<h1>Admin dashboard</h1>
+<p class="muted">Manage TikTok destinations and redirect counts.</p>
+<section id="login" class="panel">
+<h2>Sign in</h2>
+<form id="loginForm"><input id="password" type="password" placeholder="Admin password" autocomplete="current-password" required><p><button>Sign in</button></p></form>
+<div id="loginMsg" class="msg" role="status"></div>
+</section>
+<section id="dash" class="hidden">
+<div class="grid">
+<div class="stat">Total redirects<div id="total" class="num">0</div></div>
+<div class="stat">Enabled links<div id="enabled" class="num">0</div></div>
+<div class="stat">Total links<div id="count" class="num">0</div></div>
+</div>
+<section class="panel">
+<h2>Add destinations</h2>
+<p class="muted">Paste all your TikTok URLs into one box, one link per line.</p>
+<form id="add">
+<textarea id="urls" aria-label="TikTok URLs" placeholder="https://www.tiktok.com/@account1&#10;https://www.tiktok.com/@account2&#10;https://www.tiktok.com/@account3" required></textarea>
+<p><button id="addButton" type="submit">Add All Links</button></p>
+</form>
+<div id="msg" class="msg" role="status"></div>
+</section>
+<section class="panel">
+<button class="secondary" id="refresh" type="button">Refresh</button>
+<button class="secondary" id="logout" type="button">Sign out</button>
+<div id="links"></div>
+</section>
+</section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+async function api(method,body){
+ const r=await fetch('/.netlify/functions/'+(method==='AUTH'?'admin-auth':'admin-links'),{
+  method:method==='AUTH'?'POST':method,
+  headers:{'content-type':'application/json'},
+  body:body?JSON.stringify(body):undefined
+ });
+ const d=await r.json().catch(()=>({error:'Invalid server response'}));
+ if(!r.ok)throw Error(d.error||'Request failed');
+ return d;
+}
+function msg(text,id='msg'){$(id).textContent=text}
+async function load(){
+ const d=await api('GET');
+ $('total').textContent=d.total.toLocaleString();
+ $('enabled').textContent=d.links.filter(l=>l.enabled).length;
+ $('count').textContent=d.links.length;
+ $('links').replaceChildren();
+ for(const l of d.links){
+  const row=document.createElement('div');row.className='row';
+  const url=document.createElement('input');url.type='url';url.value=l.url;url.setAttribute('aria-label','TikTok URL');
+  const info=document.createElement('span');info.className='muted';info.textContent=`${l.count} redirects · ${l.enabled?'Enabled':'Disabled'}`;
+  const actions=document.createElement('div');actions.className='actions';
+  const save=document.createElement('button');save.textContent='Save';save.onclick=async()=>{
+   try{await api('PUT',{id:l.id,url:url.value.trim()});msg('Saved.');await load()}catch(e){msg(e.message)}
+  };
+  const toggle=document.createElement('button');toggle.className='secondary';toggle.textContent=l.enabled?'Disable':'Enable';toggle.onclick=async()=>{
+   try{await api('PATCH',{id:l.id,enabled:!l.enabled});await load()}catch(e){msg(e.message)}
+  };
+  const del=document.createElement('button');del.className='danger';del.textContent='Delete';del.onclick=async()=>{
+   if(confirm('Remove this destination from rotation?'))try{await api('DELETE',{id:l.id});await load()}catch(e){msg(e.message)}
+  };
+  actions.append(save,toggle,del);row.append(url,info,actions);$('links').append(row);
+ }
+}
+$('loginForm').onsubmit=async e=>{
+ e.preventDefault();
+ try{await api('AUTH',{password:$('password').value});$('login').classList.add('hidden');$('dash').classList.remove('hidden');$('password').value='';msg('','loginMsg');await load()}
+ catch(err){msg(err.message,'loginMsg')}
+};
+$('add').onsubmit=async e=>{
+ e.preventDefault();
+ const urls=$('urls').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+ if(!urls.length){msg('Paste at least one link.');return}
+ const button=$('addButton');button.disabled=true;
+ try{
+  const result=await api('POST',{urls});
+  $('urls').value='';
+  await load();
+  msg(`${result.added} link(s) added. Duplicates were skipped.`);
+ }catch(err){msg(err.message)}finally{button.disabled=false}
+};
+$('refresh').onclick=()=>load().catch(e=>msg(e.message));
+$('logout').onclick=async()=>{
+ try{await fetch('/.netlify/functions/admin-auth',{method:'DELETE'})}finally{
+  $('dash').classList.add('hidden');$('login').classList.remove('hidden');
+ }
+};
+(async()=>{try{await load();$('login').classList.add('hidden');$('dash').classList.remove('hidden')}catch{}})();
+</script>
+</body></html>
