@@ -1,3 +1,33 @@
-import {redis,LINKS_KEY,POINTER_KEY,COUNTER_PREFIX} from "../../lib/common.js";
-const lua=`local raw=redis.call('GET',KEYS[1]); if not raw then return {'EMPTY'} end; local links=cjson.decode(raw); local en={}; for _,v in ipairs(links) do if v.enabled==true then table.insert(en,v) end end; if #en==0 then return {'EMPTY'} end; local n=redis.call('INCR',KEYS[2]); local i=((n-1)%#en)+1; local v=en[i]; local c=redis.call('INCR',ARGV[1]..v.id); return {v.url,v.id,tostring(c),v.label}`;
-export default async()=>{try{const r=await redis.eval(lua,[LINKS_KEY,POINTER_KEY],[COUNTER_PREFIX]);if(!r||r[0]==="EMPTY")return {statusCode:503,headers:{"content-type":"text/plain","cache-control":"no-store"},body:"No destinations are enabled."};return {statusCode:302,headers:{Location:r[0],"Cache-Control":"no-store, no-cache, must-revalidate","Referrer-Policy":"strict-origin-when-cross-origin","X-Robots-Tag":"noindex, nofollow"},body:`Redirecting to ${r[3]}: ${r[0]}`}}catch(e){console.error(e);return {statusCode:500,body:"Redirect service temporarily unavailable."}}};
+
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/"
+  to = "/.netlify/functions/rotate"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/r"
+  to = "/.netlify/functions/rotate"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-store"
